@@ -1,0 +1,21 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.production.local
+
+# Uploads directory
+uploads/
+
+# Prisma
+prisma/dev.db
+prisma/dev.db-journal
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
