@@ -7,10 +7,13 @@ import { useState } from 'react';
 
 interface FileItemProps {
   file: FileItemType;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
   onDelete: (fileId: string) => void;
+  onPin: (fileId: string, isPinned: boolean) => void;
 }
 
-export default function FileItem({ file, onDelete }: FileItemProps) {
+export default function FileItem({ file, selected, onSelect, onDelete, onPin }: FileItemProps) {
   const expired = file.status === 'expired';
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
@@ -18,30 +21,44 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [pinning, setPinning] = useState(false);
 
   async function handleDownload() {
     if (expired || downloading) return;
     setDownloading(true);
     setDownloadError('');
-    setDownloadProgress(null);
     try {
-      const blob = await filesApi.downloadFileWithProgress(file.id, (progress) => {
-        setDownloadProgress(progress);
-      });
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = file.originalName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(downloadUrl);
-      setDownloadProgress(null);
+      const url = await filesApi.getNativeDownloadUrl(file.id);
+      window.location.href = url;
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : '下载失败');
-      setDownloadProgress(null);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleCopyDownloadLink() {
+    try {
+      const url = await filesApi.getNativeDownloadUrl(file.id);
+      const fullUrl = `${window.location.origin}${url}`;
+      await navigator.clipboard.writeText(fullUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setDownloadError('复制失败');
+    }
+  }
+
+  async function handlePin() {
+    setPinning(true);
+    try {
+      await filesApi.pinFile(file.id, !file.isPinned);
+      onPin(file.id, !file.isPinned);
+    } catch {
+      // ignore
+    } finally {
+      setPinning(false);
     }
   }
 
@@ -67,8 +84,15 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
   return (
     <>
       <tr style={rowStyle}>
-        {/* File name */}
-        <td style={{ padding: '0 12px 0 20px', verticalAlign: 'middle' }}>
+        <td style={{ padding: '0 4px 0 20px', verticalAlign: 'middle', width: 36 }}>
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => onSelect(e.target.checked)}
+            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#2563eb' }}
+          />
+        </td>
+        <td style={{ padding: '0 12px 0 4px', verticalAlign: 'middle' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{
               width: 28, height: 28, minWidth: 28, minHeight: 28, maxWidth: 28, maxHeight: 28,
@@ -82,7 +106,7 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
               </svg>
             </div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#172033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280 }} title={file.originalName}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#172033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200 }} title={file.originalName}>
                 {file.originalName}
               </div>
               {(deleteError || downloadError) && (
@@ -91,23 +115,17 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
             </div>
           </div>
         </td>
-
-        {/* Size - hidden on mobile */}
         <td style={{ padding: '0 12px', verticalAlign: 'middle', display: 'none' }} className="table-cell-sm">
           <span style={{ fontSize: 13, color: '#6b7280' }}>{formatFileSize(file.size)}</span>
         </td>
-
-        {/* Upload time - hidden on mobile */}
         <td style={{ padding: '0 12px', verticalAlign: 'middle', display: 'none' }} className="table-cell-lg">
           <span style={{ fontSize: 13, color: '#6b7280' }}>{formatDate(file.uploadedAt)}</span>
         </td>
-
-        {/* Expiry - hidden on mobile */}
         <td style={{ padding: '0 12px', verticalAlign: 'middle', display: 'none' }} className="table-cell-lg">
-          <span style={{ fontSize: 13, color: expired ? '#ef4444' : '#6b7280' }}>{formatDate(file.expiresAt)}</span>
+          <span style={{ fontSize: 13, color: expired ? '#ef4444' : '#6b7280' }}>
+            {file.expiresAt ? formatDate(file.expiresAt) : '永久有效'}
+          </span>
         </td>
-
-        {/* Status */}
         <td style={{ padding: '0 12px', verticalAlign: 'middle' }}>
           <span style={{
             display: 'inline-flex',
@@ -122,71 +140,96 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
             {expired ? '已过期' : '可下载'}
           </span>
         </td>
-
-        {/* Action */}
         <td style={{ padding: '0 20px 0 12px', verticalAlign: 'middle' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* Download button or progress */}
-            {downloading && downloadProgress && downloadProgress.total > 0 ? (
-              <div style={{
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={handleDownload}
+              disabled={expired || downloading}
+              style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 4,
                 padding: '5px 10px',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
-                color: '#2563eb',
                 borderRadius: 10,
-                background: '#eff6ff',
-                minWidth: 90,
-              }}>
+                border: 'none',
+                cursor: expired || downloading ? 'not-allowed' : 'pointer',
+                background: expired ? '#f3f4f6' : '#2563eb',
+                color: expired ? '#d1d5db' : '#fff',
+              }}
+              onMouseEnter={(e) => { if (!expired && !downloading) e.currentTarget.style.background = '#1d4ed8'; }}
+              onMouseLeave={(e) => { if (!expired && !downloading) e.currentTarget.style.background = '#2563eb'; }}
+            >
+              {downloading ? (
                 <svg width={12} height={12} viewBox="0 0 24 24" style={{ animation: 'spin 0.6s linear infinite', flexShrink: 0 }}>
                   <circle cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} fill="none" opacity={0.25} />
                   <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" opacity={0.75} />
                 </svg>
-                {downloadProgress.percentage}%
-              </div>
-            ) : (
-              <button
-                onClick={handleDownload}
-                disabled={expired || downloading}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '5px 14px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 10,
-                  border: 'none',
-                  cursor: expired || downloading ? 'not-allowed' : 'pointer',
-                  background: expired ? '#f3f4f6' : '#2563eb',
-                  color: expired ? '#d1d5db' : '#fff',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => { if (!expired && !downloading) e.currentTarget.style.background = '#1d4ed8'; }}
-                onMouseLeave={(e) => { if (!expired && !downloading) e.currentTarget.style.background = '#2563eb'; }}
-              >
-                {downloading ? (
+              ) : (
+                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              )}
+              {expired ? '不可用' : '下载'}
+            </button>
+
+            <button
+              onClick={handleCopyDownloadLink}
+              disabled={expired}
+              title={copied ? '已复制' : '复制下载链接'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '5px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 10,
+                border: '1px solid #d1d5db',
+                cursor: expired ? 'not-allowed' : 'pointer',
+                background: copied ? '#ecfdf5' : 'transparent',
+                color: expired ? '#d1d5db' : copied ? '#059669' : '#6b7280',
+              }}
+              onMouseEnter={(e) => { if (!expired) { e.currentTarget.style.borderColor = '#2563eb'; e.currentTarget.style.color = '#2563eb'; } }}
+              onMouseLeave={(e) => { if (!expired) { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = copied ? '#059669' : '#6b7280'; } }}
+            >
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                {copied ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                ) : (
                   <>
-                    <svg width={12} height={12} viewBox="0 0 24 24" style={{ animation: 'spin 0.6s linear infinite' }}>
-                      <circle cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} fill="none" opacity={0.25} />
-                      <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" opacity={0.75} />
-                    </svg>
-                    下载中
-                  </>
-                ) : expired ? '不可用' : (
-                  <>
-                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    下载
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </>
                 )}
-              </button>
-            )}
+              </svg>
+            </button>
 
-            {/* Delete button */}
+            <button
+              onClick={handlePin}
+              disabled={pinning}
+              title={file.isPinned ? '取消置顶' : '置顶'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px',
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 10,
+                border: '1px solid #d1d5db',
+                cursor: pinning ? 'not-allowed' : 'pointer',
+                background: file.isPinned ? '#eff6ff' : 'transparent',
+                color: file.isPinned ? '#2563eb' : '#6b7280',
+              }}
+              onMouseEnter={(e) => { if (!pinning) { e.currentTarget.style.borderColor = '#2563eb'; e.currentTarget.style.color = '#2563eb'; } }}
+              onMouseLeave={(e) => { if (!pinning) { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = file.isPinned ? '#2563eb' : '#6b7280'; } }}
+            >
+              <svg width={12} height={12} viewBox="0 0 24 24" fill={file.isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v16l7-5 7 5V3H5z" />
+              </svg>
+            </button>
+
             <button
               onClick={() => setShowConfirm(true)}
               disabled={deleting}
@@ -194,7 +237,7 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
-                padding: '5px 12px',
+                padding: '4px 8px',
                 fontSize: 12,
                 fontWeight: 600,
                 borderRadius: 10,
@@ -202,38 +245,19 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
                 cursor: deleting ? 'not-allowed' : 'pointer',
                 background: deleting ? '#fef2f2' : 'transparent',
                 color: deleting ? '#fca5a5' : '#ef4444',
-                transition: 'all 0.15s',
                 opacity: deleting ? 0.6 : 1,
               }}
-              onMouseEnter={(e) => {
-                if (!deleting) { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#ef4444'; }
-              }}
-              onMouseLeave={(e) => {
-                if (!deleting) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = '#fca5a5'; }
-              }}
+              onMouseEnter={(e) => { if (!deleting) { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#ef4444'; } }}
+              onMouseLeave={(e) => { if (!deleting) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = '#fca5a5'; } }}
             >
-              {deleting ? (
-                <>
-                  <svg width={12} height={12} viewBox="0 0 24 24" style={{ animation: 'spin 0.6s linear infinite' }}>
-                    <circle cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={4} fill="none" opacity={0.25} />
-                    <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" opacity={0.75} />
-                  </svg>
-                  删除中
-                </>
-              ) : (
-                <>
-                  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  删除
-                </>
-              )}
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ flexShrink: 0 }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
             </button>
           </div>
         </td>
       </tr>
 
-      {/* Delete confirmation modal */}
       {showConfirm && (
         <div
           style={{
@@ -275,7 +299,6 @@ export default function FileItem({ file, onDelete }: FileItemProps) {
             </div>
             <p style={{ fontSize: 13, color: '#4b5563', margin: '0 0 20px', wordBreak: 'break-all' }}>
               确定要删除文件 <strong style={{ color: '#172033' }}>{file.originalName}</strong> 吗？
-              删除后将同时移除服务器上的文件记录和存储文件。
             </p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button

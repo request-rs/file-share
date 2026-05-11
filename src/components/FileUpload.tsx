@@ -8,6 +8,8 @@ interface UploadTaskInfo {
   id: string;
   fileName: string;
   fileSize: number;
+  fileId?: string;
+  downloadUrl?: string;
   progress: number;
   status: 'pending' | 'uploading' | 'completed' | 'failed' | 'cancelled';
   error: string;
@@ -127,16 +129,30 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
     );
   }
 
+  async function copyDownloadLink(task: UploadTaskInfo) {
+    if (!task.fileId) return;
+    try {
+      const url = await filesApi.getNativeDownloadUrl(task.fileId);
+      const fullUrl = `${window.location.origin}${url}`;
+      await navigator.clipboard.writeText(fullUrl);
+      alert('下载链接已复制');
+    } catch {
+      alert('复制失败');
+    }
+  }
+
   const startUpload = useCallback(async () => {
     if (selectedFiles.length === 0 || uploadingRef.current) return;
 
     uploadingRef.current = true;
 
     const filesToUpload = [...selectedFiles];
-    const newTasks: UploadTaskInfo[] = filesToUpload.map((file, idx) => ({
+    const newTasks: UploadTaskInfo[] = filesToUpload.map((file) => ({
       id: `task-${++taskIdCounter}`,
       fileName: file.name,
       fileSize: file.size,
+      fileId: undefined,
+      downloadUrl: undefined,
       progress: 0,
       status: 'pending' as const,
       error: '',
@@ -164,7 +180,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
       );
 
       try {
-        await filesApi.upload([file], {
+        const result = await filesApi.upload([file], {
           signal: controller.signal,
           onProgress: (progress) => {
             setTasks((prev) =>
@@ -175,10 +191,18 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
           },
         });
 
+        const uploadedFile = result.files?.[0];
+
         setTasks((prev) =>
           prev.map((t) =>
             t.id === task.id
-              ? { ...t, status: 'completed' as const, progress: 100 }
+              ? {
+                  ...t,
+                  status: 'completed' as const,
+                  progress: 100,
+                  fileId: uploadedFile?.id,
+                  downloadUrl: uploadedFile?.downloadUrl,
+                }
               : t
           )
         );
@@ -234,7 +258,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
           上传文件
         </h2>
         <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>
-          支持多个文件同时上传，默认 7 天后过期
+          支持多个文件同时上传，默认永久有效
         </p>
       </div>
 
@@ -348,7 +372,6 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
         </div>
       </div>
 
-      {/* Upload task list */}
       {tasks.length > 0 && (
         <div style={{ padding: '0 20px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -397,27 +420,46 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
                       </div>
                     </div>
                   </div>
-                  {(task.status === 'pending' || task.status === 'uploading') && (
-                    <button
-                      onClick={() => cancelUpload(task.id)}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: '#ef4444',
-                        background: 'transparent',
-                        border: '1px solid #fca5a5',
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                        marginLeft: 8,
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      取消
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                    {(task.status === 'pending' || task.status === 'uploading') && (
+                      <button
+                        onClick={() => cancelUpload(task.id)}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: '#ef4444',
+                          background: 'transparent',
+                          border: '1px solid #fca5a5',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        取消
+                      </button>
+                    )}
+                    {task.status === 'completed' && (
+                      <button
+                        onClick={() => copyDownloadLink(task)}
+                        style={{
+                          padding: '4px 10px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: '#2563eb',
+                          background: 'transparent',
+                          border: '1px solid #93c5fd',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#eff6ff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        复制下载链接
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {task.status === 'uploading' && (
                   <div style={{ width: '100%', height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>

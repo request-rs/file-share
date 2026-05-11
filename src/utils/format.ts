@@ -17,7 +17,8 @@ export function formatDate(dateStr: string): string {
   });
 }
 
-export function isExpired(expiresAt: string): boolean {
+export function isExpired(expiresAt: string | null): boolean {
+  if (!expiresAt) return false;
   return new Date(expiresAt) < new Date();
 }
 

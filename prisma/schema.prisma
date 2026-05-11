@@ -8,15 +8,41 @@ datasource db {
 }
 
 model File {
-  id            String   @id
+  id            String      @id
   originalName  String
   storedName    String
   size          Int
   mimeType      String
   storagePath   String
   uploadedAt    DateTime
-  expiresAt     DateTime
-  downloadCount Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  expiresAt     DateTime?
+  downloadCount Int         @default(0)
+  isPinned      Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  shareFiles    ShareFile[]
+}
+
+model ShareLink {
+  id          String      @id @default(cuid())
+  token       String      @unique
+  title       String?
+  expiresAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  files       ShareFile[]
+}
+
+model ShareFile {
+  id          String     @id @default(cuid())
+  shareLinkId String
+  fileId      String
+  createdAt   DateTime   @default(now())
+
+  shareLink   ShareLink  @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+  file        File       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([shareLinkId, fileId])
 }
