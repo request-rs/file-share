@@ -10,7 +10,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const files = await getFiles();
+  const url = new URL(request.url);
+  const filter = url.searchParams.get('filter') || undefined;
+  const sort = url.searchParams.get('sort') || undefined;
+  const search = url.searchParams.get('search') || undefined;
+
+  const files = await getFiles({ filter, sort, search });
 
   return NextResponse.json({ files });
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFileRecord, incrementDownloadCount } from '@/lib/api/file-store';
-import { verifyDownloadToken } from '@/lib/api/download-token';
+import { getShareFileRecord } from '@/lib/api/share-store';
+import { incrementDownloadCount } from '@/lib/api/file-store';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import path from 'path';
@@ -15,46 +15,42 @@ function isStoragePathSafe(filePath: string): boolean {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { token: string; fileId: string } }
 ) {
-  const authHeader = request.headers.get('authorization');
-  const url = new URL(request.url);
-  const queryToken = url.searchParams.get('token');
+  const shareFile = await getShareFileRecord(params.token, params.fileId);
 
-  let authorized = false;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    authorized = true;
-  } else if (queryToken) {
-    const payload = verifyDownloadToken(queryToken);
-    if (payload && payload.fileId === params.id) {
-      authorized = true;
-    }
-  }
-
-  if (!authorized) {
+  if (!shareFile) {
     return NextResponse.json(
-      { success: false, message: '未授权访问' },
-      { status: 401 }
+      { success: false, message: '文件不存在或无权访问' },
+      { status: 403 }
     );
   }
 
-  const record = await getFileRecord(params.id);
+  const share = shareFile.shareLink;
+  const file = shareFile.file;
 
-  if (!record) {
+  if (share.expiresAt && share.expiresAt < new Date()) {
+    return NextResponse.json(
+      { success: false, message: '分享链接已过期' },
+      { status: 410 }
+    );
+  }
+
+  if (!file) {
     return NextResponse.json(
       { success: false, message: '文件不存在' },
       { status: 404 }
     );
   }
 
-  if (record.expiresAt && record.expiresAt < new Date()) {
+  if (file.expiresAt && file.expiresAt < new Date()) {
     return NextResponse.json(
       { success: false, message: '文件已过期' },
       { status: 410 }
     );
   }
 
-  if (!isStoragePathSafe(record.storagePath)) {
+  if (!isStoragePathSafe(file.storagePath)) {
     return NextResponse.json(
       { success: false, message: '文件不存在' },
       { status: 404 }
@@ -62,11 +58,11 @@ export async function GET(
   }
 
   try {
-    const fileStat = await stat(record.storagePath);
+    const fileStat = await stat(file.storagePath);
 
-    incrementDownloadCount(record.id).catch(() => {});
+    incrementDownloadCount(file.id).catch(() => {});
 
-    const stream = createReadStream(record.storagePath);
+    const stream = createReadStream(file.storagePath);
     const readable = new ReadableStream({
       start(controller) {
         stream.on('data', (chunk) => {
@@ -83,15 +79,15 @@ export async function GET(
 
     return new NextResponse(readable, {
       headers: {
-        'Content-Type': record.mimeType || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(record.originalName)}`,
+        'Content-Type': file.mimeType || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.originalName)}`,
         'Content-Length': String(fileStat.size),
       },
     });
   } catch {
     return NextResponse.json(
-      { success: false, message: '文件不存在' },
-      { status: 404 }
+      { success: false, message: '文件读取失败' },
+      { status: 500 }
     );
   }
 }

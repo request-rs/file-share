@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addFile } from '@/lib/api/file-store';
-import { appConfig } from '@/config';
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -16,8 +15,8 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll('files') as File[];
     const expiresAtRaw = formData.get('expiresAt') as string | null;
 
-    let expireDays = appConfig.defaultExpireDays;
-    if (expiresAtRaw) {
+    let expireDays: number | null = null;
+    if (expiresAtRaw && expiresAtRaw !== 'permanent') {
       const target = new Date(expiresAtRaw);
       const diffMs = target.getTime() - Date.now();
       expireDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
@@ -30,7 +29,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const maxSize = appConfig.maxFileSize;
+    const maxSize = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '500', 10) * 1024 * 1024;
     const maxSizeMB = Math.round(maxSize / 1024 / 1024);
 
     const uploadedFiles = [];
