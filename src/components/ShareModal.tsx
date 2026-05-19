@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { FileItem as FileItemType } from '@/types/file';
 import { formatFileSize, formatDate } from '@/utils/format';
 import { sharesApi } from '@/lib/api/shares';
+import { copyToClipboard } from '@/utils/clipboard';
 
 interface ShareModalProps {
   files: FileItemType[];
@@ -99,10 +100,10 @@ export default function ShareModal({ files, selectedIds, onClose, onSuccess }: S
   async function copyLink() {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(result.url);
+      await copyToClipboard(result.url);
       alert('分享链接已复制');
     } catch {
-      alert('复制失败');
+      alert('复制失败，请手动复制链接');
     }
   }
 

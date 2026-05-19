@@ -2,6 +2,7 @@
 
 import { useState, useRef, DragEvent, ChangeEvent, useCallback } from 'react';
 import { filesApi } from '@/lib/api/files';
+import { copyToClipboard } from '@/utils/clipboard';
 import { formatFileSize } from '@/utils/format';
 
 interface UploadTaskInfo {
@@ -134,10 +135,10 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
     try {
       const url = await filesApi.getNativeDownloadUrl(task.fileId);
       const fullUrl = `${window.location.origin}${url}`;
-      await navigator.clipboard.writeText(fullUrl);
+      await copyToClipboard(fullUrl);
       alert('下载链接已复制');
     } catch {
-      alert('复制失败');
+      alert('复制失败，请检查网络后重试');
     }
   }
 

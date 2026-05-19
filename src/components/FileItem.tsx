@@ -3,6 +3,7 @@
 import { FileItem as FileItemType, DownloadProgress } from '@/types/file';
 import { formatDate, formatFileSize } from '@/utils/format';
 import { filesApi } from '@/lib/api/files';
+import { copyToClipboard } from '@/utils/clipboard';
 import { useState } from 'react';
 
 interface FileItemProps {
@@ -32,7 +33,7 @@ export default function FileItem({ file, selected, onSelect, onDelete, onPin }: 
       const url = await filesApi.getNativeDownloadUrl(file.id);
       window.location.href = url;
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : '下载失败');
+      setDownloadError(err instanceof Error ? err.message : '下载失败，请检查网络连接');
     } finally {
       setDownloading(false);
     }
@@ -42,11 +43,11 @@ export default function FileItem({ file, selected, onSelect, onDelete, onPin }: 
     try {
       const url = await filesApi.getNativeDownloadUrl(file.id);
       const fullUrl = `${window.location.origin}${url}`;
-      await navigator.clipboard.writeText(fullUrl);
+      await copyToClipboard(fullUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setDownloadError('复制失败');
+      setDownloadError('复制下载链接失败，请检查网络或手动复制');
     }
   }
 
