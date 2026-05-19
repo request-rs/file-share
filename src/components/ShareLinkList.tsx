@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ShareLinkItem } from '@/types/file';
 import { formatDate } from '@/utils/format';
 import { sharesApi } from '@/lib/api/shares';
+import { copyToClipboard } from '@/utils/clipboard';
 
 interface ShareLinkListProps {
   shares: ShareLinkItem[];
@@ -18,7 +19,7 @@ export default function ShareLinkList({ shares, loading, onRefresh, onDelete }: 
 
   async function handleCopy(share: ShareLinkItem) {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${share.url}`);
+      await copyToClipboard(`${window.location.origin}${share.url}`);
       setCopiedId(share.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch {
