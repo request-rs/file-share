@@ -10,6 +10,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const maxSize = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '500', 10) * 1024 * 1024;
+  const maxSizeMB = Math.round(maxSize / 1024 / 1024);
+
+  const contentLength = request.headers.get('content-length');
+  if (contentLength) {
+    const cl = parseInt(contentLength, 10);
+    if (cl > maxSize * 2) {
+      return NextResponse.json(
+        { success: false, error: 'FILE_TOO_LARGE', message: `请求体超过限制 (最大 ${maxSizeMB} MB)` },
+        { status: 413 }
+      );
+    }
+  }
+
   try {
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
@@ -29,14 +43,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const maxSize = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '500', 10) * 1024 * 1024;
-    const maxSizeMB = Math.round(maxSize / 1024 / 1024);
-
     const uploadedFiles = [];
     for (const file of files) {
       if (file.size > maxSize) {
         return NextResponse.json(
-          { success: false, message: `文件 "${file.name}" 超过大小限制 (最大 ${maxSizeMB} MB)` },
+          { success: false, error: 'FILE_TOO_LARGE', message: `文件 "${file.name}" 超过 ${maxSizeMB} MB 限制` },
           { status: 413 }
         );
       }

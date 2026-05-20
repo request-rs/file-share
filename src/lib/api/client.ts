@@ -102,7 +102,10 @@ class ApiClient {
         } else {
           try {
             const error = JSON.parse(xhr.responseText);
-            reject(new Error(error.message || '上传失败'));
+            const msg = xhr.status === 413
+              ? (error.message || '文件超过大小限制')
+              : (error.message || '上传失败');
+            reject(new Error(msg));
           } catch {
             reject(new Error('上传失败'));
           }
