@@ -6,6 +6,8 @@ import { stat } from 'fs/promises';
 import path from 'path';
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
+const USE_X_ACCEL = process.env.USE_X_ACCEL_REDIRECT === 'true';
+const X_ACCEL_PATH = process.env.X_ACCEL_REDIRECT_PATH || '/protected-downloads/';
 
 function isStoragePathSafe(filePath: string): boolean {
   const resolved = path.resolve(filePath);
@@ -32,39 +34,39 @@ export async function GET(
   }
 
   if (!authorized) {
-    return NextResponse.json(
-      { success: false, message: '未授权访问' },
-      { status: 401 }
-    );
+    return NextResponse.json({ success: false, message: '未授权访问' }, { status: 401 });
   }
 
   const record = await getFileRecord(params.id);
 
   if (!record) {
-    return NextResponse.json(
-      { success: false, message: '文件不存在' },
-      { status: 404 }
-    );
+    return NextResponse.json({ success: false, message: '文件不存在' }, { status: 404 });
   }
 
   if (record.expiresAt && record.expiresAt < new Date()) {
-    return NextResponse.json(
-      { success: false, message: '文件已过期' },
-      { status: 410 }
-    );
+    return NextResponse.json({ success: false, message: '文件已过期' }, { status: 410 });
   }
 
   if (!isStoragePathSafe(record.storagePath)) {
-    return NextResponse.json(
-      { success: false, message: '文件不存在' },
-      { status: 404 }
-    );
+    return NextResponse.json({ success: false, message: '文件不存在' }, { status: 404 });
   }
 
   try {
     const fileStat = await stat(record.storagePath);
-
     incrementDownloadCount(record.id).catch(() => {});
+
+    if (USE_X_ACCEL) {
+      const redirectPath = `${X_ACCEL_PATH.replace(/\/$/, '')}/${path.basename(record.storagePath)}`;
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          'Content-Type': record.mimeType || 'application/octet-stream',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(record.originalName)}`,
+          'Content-Length': String(fileStat.size),
+          'X-Accel-Redirect': redirectPath,
+        },
+      });
+    }
 
     const stream = createReadStream(record.storagePath);
     const readable = new ReadableStream({
@@ -72,12 +74,8 @@ export async function GET(
         stream.on('data', (chunk) => {
           controller.enqueue(new Uint8Array(Buffer.from(chunk)));
         });
-        stream.on('end', () => {
-          controller.close();
-        });
-        stream.on('error', (err) => {
-          controller.error(err);
-        });
+        stream.on('end', () => { controller.close(); });
+        stream.on('error', (err) => { controller.error(err); });
       },
     });
 
@@ -89,9 +87,6 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.json(
-      { success: false, message: '文件不存在' },
-      { status: 404 }
-    );
+    return NextResponse.json({ success: false, message: '文件不存在' }, { status: 404 });
   }
 }
