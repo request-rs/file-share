@@ -4,6 +4,7 @@ import { useState, useRef, DragEvent, ChangeEvent, useCallback } from 'react';
 import { filesApi } from '@/lib/api/files';
 import { copyToClipboard } from '@/utils/clipboard';
 import { formatFileSize } from '@/utils/format';
+import { appConfig } from '@/config';
 
 interface UploadTaskInfo {
   id: string;
@@ -12,7 +13,7 @@ interface UploadTaskInfo {
   fileId?: string;
   downloadUrl?: string;
   progress: number;
-  status: 'pending' | 'uploading' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'uploading' | 'completed' | 'failed' | 'cancelled' | 'rejected';
   error: string;
   controller: AbortController | null;
 }
@@ -22,6 +23,21 @@ interface FileUploadProps {
 }
 
 let taskIdCounter = 0;
+const MAX_SIZE_MB = appConfig.publicMaxFileSizeMB;
+const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+
+function validateFiles(files: File[]): { valid: File[]; rejected: { name: string; size: number }[] } {
+  const valid: File[] = [];
+  const rejected: { name: string; size: number }[] = [];
+  for (const f of files) {
+    if (f.size > MAX_SIZE_BYTES) {
+      rejected.push({ name: f.name, size: f.size });
+    } else {
+      valid.push(f);
+    }
+  }
+  return { valid, rejected };
+}
 
 function getStatusIcon(status: UploadTaskInfo['status']): JSX.Element {
   switch (status) {
@@ -41,6 +57,7 @@ function getStatusIcon(status: UploadTaskInfo['status']): JSX.Element {
         </div>
       );
     case 'failed':
+    case 'rejected':
       return (
         <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth={3}>
@@ -72,13 +89,15 @@ function getStatusText(status: UploadTaskInfo['status']): string {
     case 'completed': return '已完成';
     case 'failed': return '上传失败';
     case 'cancelled': return '已取消';
+    case 'rejected': return '已拒绝';
   }
 }
 
 function getStatusColor(status: UploadTaskInfo['status']): string {
   switch (status) {
     case 'completed': return '#059669';
-    case 'failed': return '#dc2626';
+    case 'failed':
+    case 'rejected': return '#dc2626';
     case 'cancelled': return '#9ca3af';
     case 'uploading': return '#2563eb';
     default: return '#6b7280';
@@ -107,15 +126,40 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFiles(Array.from(e.dataTransfer.files));
+      const files = Array.from(e.dataTransfer.files);
+      const { valid, rejected } = validateFiles(files);
+      if (rejected.length > 0) {
+        addRejectedTasks(rejected);
+      }
+      setSelectedFiles(valid);
     }
   }
 
   function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedFiles(Array.from(e.target.files));
+      const files = Array.from(e.target.files);
+      const { valid, rejected } = validateFiles(files);
+      if (rejected.length > 0) {
+        addRejectedTasks(rejected);
+      }
+      setSelectedFiles(valid);
     }
     e.currentTarget.value = '';
+  }
+
+  function addRejectedTasks(rejected: { name: string; size: number }[]) {
+    const rejectedTasks: UploadTaskInfo[] = rejected.map((r) => ({
+      id: `task-${++taskIdCounter}`,
+      fileName: r.name,
+      fileSize: r.size,
+      fileId: undefined,
+      downloadUrl: undefined,
+      progress: 0,
+      status: 'rejected' as const,
+      error: `文件超过 ${MAX_SIZE_MB} MB 限制`,
+      controller: null,
+    }));
+    setTasks((prev) => [...prev, ...rejectedTasks]);
   }
 
   function cancelUpload(taskId: string) {
@@ -235,6 +279,10 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
     setTasks([]);
   }
 
+  function canClear(t: UploadTaskInfo) {
+    return t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' || t.status === 'rejected';
+  }
+
   const cardStyle: React.CSSProperties = {
     background: '#fff',
     borderRadius: 18,
@@ -259,7 +307,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
           上传文件
         </h2>
         <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>
-          支持多个文件同时上传，默认永久有效
+          单个文件最大 {MAX_SIZE_MB} MB，支持多个文件同时上传，默认永久有效
         </p>
       </div>
 
@@ -379,7 +427,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
             <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>
               上传队列 ({tasks.filter((t) => t.status === 'completed').length}/{tasks.length})
             </span>
-            {tasks.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') && (
+            {tasks.every(canClear) && (
               <button
                 onClick={clearTasks}
                 style={{
@@ -414,10 +462,9 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
                         {task.fileName}
                       </div>
                       <div style={{ fontSize: 11, color: getStatusColor(task.status), marginTop: 1 }}>
-                        {getStatusText(task.status)}
-                        {task.status === 'uploading' && ` ${task.progress}%`}
-                        {task.status === 'uploading' && ` - ${formatFileSize(task.fileSize)}`}
-                        {(task.status === 'pending' || task.status === 'completed') && ` - ${formatFileSize(task.fileSize)}`}
+                        {task.error ? task.error : getStatusText(task.status)}
+                        {task.status === 'uploading' && !task.error && ` ${task.progress}%`}
+                        {(task.status === 'uploading' || task.status === 'pending' || task.status === 'completed') && !task.error && ` - ${formatFileSize(task.fileSize)}`}
                       </div>
                     </div>
                   </div>
@@ -472,7 +519,7 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
                     <div style={{ width: '100%', height: 4, background: '#059669', borderRadius: 2 }} />
                   </div>
                 )}
-                {task.status === 'failed' && task.error && (
+                {(task.status === 'failed' || task.status === 'rejected') && task.error && (
                   <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>{task.error}</div>
                 )}
               </div>
