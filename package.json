@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "cleanup": "tsx scripts/cleanup.ts",
+    "cleanup:uploads": "tsx scripts/cleanup-uploads.ts",
     "db:migrate": "npx prisma migrate dev",
     "db:migrate:deploy": "npx prisma migrate deploy",
     "db:generate": "npx prisma generate"

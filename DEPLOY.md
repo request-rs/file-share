@@ -11,6 +11,7 @@
 ```bash
 # 创建数据存储目录
 sudo mkdir -p /data/file-share/uploads
+sudo mkdir -p /data/file-share/uploads/tmp
 sudo mkdir -p /data/file-share/db
 
 # 设置权限（假设 nginx/www 用户运行服务）
@@ -134,46 +135,86 @@ npm start
 
 默认监听 `http://localhost:3000`。
 
-## 7. Nginx 反向代理（可选）
+## 7. Nginx 反向代理 + 大文件下载
+
+本项目支持两种下载模式：
+- **Node.js 流式下载**：默认模式，适合小文件
+- **Nginx X-Accel-Redirect**：推荐用于 1GB 大文件下载
+
+### 7.1 Nginx 配置（推荐）
 
 ```nginx
 server {
     listen 80;
     server_name your-domain.com;
 
-    client_max_body_size 500m;
+    # 分片上传只需要 100M，不需要 1G
+    client_max_body_size 100M;
+    client_body_timeout 3600s;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    send_timeout 3600s;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 内部下载路径：用户不能直接访问，只有后端返回 X-Accel-Redirect 头时 Nginx 才发送文件
+    location /protected-downloads/ {
+        internal;
+        alias /var/www/file-share/uploads/;
     }
 }
 ```
 
-注意 `client_max_body_size` 需要匹配 `MAX_UPLOAD_SIZE_MB` 的大小。
+### 7.2 启用 X-Accel-Redirect
 
-## 8. 定时清理过期文件
+在 `.env.production` 中设置：
 
-使用 crontab 定时执行清理脚本：
+```env
+USE_X_ACCEL_REDIRECT=true
+X_ACCEL_REDIRECT_PATH=/protected-downloads/
+```
+
+启用后：
+- 下载请求经过 Node.js 校验权限（登录、过期、分享链接有效性）
+- 校验通过后返回 `X-Accel-Redirect` 头，Nginx 直接发送文件
+- Node.js 不占用大量内存和 CPU 传输大文件
+
+### 7.3 注意事项
+
+- `client_max_body_size` 设置为 100M 足够，因为分片上传每片只有 20MB
+- `proxy_read_timeout` 等超时设置要足够大，支持慢速网络下载
+- 如果调整分片大小，同步调整 `client_max_body_size`
+
+## 8. 定时清理
+
+### 8.1 清理过期文件
 
 ```bash
-# 编辑 crontab
-crontab -e
-
-# 每天凌晨 2 点执行清理
+# 每天凌晨 2 点执行
 0 2 * * * cd /opt/file-share && npx tsx scripts/cleanup.ts >> /var/log/file-share-cleanup.log 2>&1
 ```
 
-也可以手动执行：
+### 8.2 清理残留临时分片
+
+分片上传过程中如果用户取消或网络中断，`uploads/tmp` 中会残留分片目录。定时清理超过 24 小时的临时分片：
+
+```bash
+# 每天凌晨 3 点执行
+0 3 * * * cd /opt/file-share && npx tsx scripts/cleanup-uploads.ts >> /var/log/file-share-cleanup-uploads.log 2>&1
+```
+
+手动执行：
 
 ```bash
 npm run cleanup
+npx tsx scripts/cleanup-uploads.ts
 ```
 
 ## 9. 备份策略
